@@ -1,9 +1,9 @@
 # OctSceneScan
 
-Welcome to my side project for 3D Scene handling. Recently 3D conv have been dominating many tasks such as medical imaging and 3D object classification. However, this are generally very limited in input dimensions because the data grows to the 3rd power with resolution. Scan complete handles this by creating 8 different nets for 3 levels (24 total) where each is trained separately. This causes the net to be very big and does not permit end to end training. 
+Welcome to my side project for 3D Scene handling. Recently 3D conv have been dominating many tasks such as medical imaging and 3D object classification. However, this are generally very limited in input dimensions because the data grows to the 3rd power with resolution. Scan Complete [] handles this by creating 8 different nets for 3 levels (24 total) where each is trained separately. This causes the net to be very big and does not permit end to end training. 
 
-There are a few papers that handle this using the sparsity in 3D such as octnet. Genereally these require knowledge of the sparsity in advance (example 3D point classification) and is not computed on the fly as is needed for signed distance function completion where the location of the level set is not known in advance (it’s the target of the net)
-Malik used dynamic computation on graphs (in Torch) for 3D object generation from images. This work is my exploration, trying to use PyTorch simple dynamic graphs to denoise/ complete SDF efficiently.
+There are a few papers that handle this using the sparsity in 3D such as octnet[]. Genereally these require knowledge of the sparsity in advance (example 3D point classification) and is not computed on the fly as is needed for signed distance function completion where the location of the level set is not known in advance (it’s the target of the net)
+Malik[] used dynamic computation on graphs (in Torch) for 3D object generation from images. This work is my exploration, trying to use PyTorch's simple dynamic graphs to denoise/ complete SDF efficiently.
 
 ## Hyrarchal architecture
 each level l
