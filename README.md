@@ -8,6 +8,9 @@ Malik used dynamic computation on graphs (in Torch) for 3D object generation fro
 ## Method
 Goal is to denois the input TSDF. As a hello world I generate a TSDF from random ellipsoids in a 32^3 grid. This is small enough to run a full 3D conv net (no hyrarchy, no dynamic branching…)
 
+![Alt Text](DeepTSDF.gif)
+
+
 ## Hyrarchal architecture
 TBD
 
