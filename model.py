@@ -97,10 +97,8 @@ class MidLevel(nn.Module):
         self.block1 = BasicBlock(inplane*2, inplane)
         self.block2 = BasicBlock(inplane, outplane)
         #self.pred = PredictionBlock(outplane, 3)
-        #self.dummy = nn.Conv3d( 1, 3, kernel_size=1, stride=1, padding=0, bias=False)
         self.thresh = thresh
-        self.down = tsdf_res/32
-        self.tsdf_down = nn.AvgPool3d(kernel_size=self.down)
+        self.tsdf_down = nn.AvgPool3d(kernel_size=tsdf_res/32)
 
     def forward(self,TSDF, prev):
         x = self.upsample(prev)
@@ -109,10 +107,9 @@ class MidLevel(nn.Module):
         out = torch.cat((x,y),dim=1)
         out = self.block1(out)
         out = self.block2(out)
-        #ret = self.dummy(TSDF)
-        #ret = torch.zeros(1,3,TSDF.shape[2], TSDF.shape[3], TSDF.shape[4], requires_grad=True)
         #pred = self.pred(out)
         #if pred[0][1]<0.1 : #self.thresh:
+        # repeat ret a bunch of time to be the same dim as TSDF
         #    ret = pred[:,:,None,None,None]
         #    return ret
         half = TSDF.shape[-1]/2

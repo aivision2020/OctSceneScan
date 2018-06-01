@@ -142,7 +142,7 @@ def test_dynamic_graph():
         y = y.max()
     y.backward()
 
-def test_2tier_net():
+def test_2tier_net_single_data():
     res = 64
     dataset = TsdfGenerator(res, n_elips=3, sigma=0.9,epoch_size=100)
 
@@ -184,5 +184,4 @@ def test_2tier_net():
             err = plotVoxelVisdom(gt[0].numpy(), sdf_, tsdf_in[0][0].numpy(), vis)
             print it, err
     assert err<1
-if __name__=='__main__':
-    test_convtrans()
+
