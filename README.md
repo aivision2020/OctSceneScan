@@ -37,10 +37,17 @@ As a hello world I generate a TSDF from random ellipsoids in a 32^3 grid and add
 
 ![Alt Text](DeepTSDF.gif)
 
+## Two levels
+Generate a TSDF from random ellipsoids in a 64^3 grid and add gaussian noise. This is the limit of what can be run brute force  on a single GPU (no early branch termination, no prediction yet)
+
+![Alt Text](64_cube.png)
+
 ## Known Issues
 Zero pad is not good for boundaries on the lowest level. Use voxel overlap (currently use replication padding)
+Outpud is not smooth around block edges. Using splits with outverlap should solve this
 Use the prediction in the loss function (otherwise the net will always prefer to go the whole depth)
 Training - Should train layer by layer or depth first with subsampling to handle the large compute untill the prediction converges
+output is blocky. Since output is a classification with dont get the sub-voxel accuracy that could be achieved (see GT ellipsoids)
 
 ## References
 TODO format this shit
