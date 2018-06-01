@@ -13,13 +13,14 @@ def plotVoxelVisdom(GT_voxels, voxels, tsdf_in, visdom):
     kd = KDTree(v_gt)
     d,ind = kd.query(v)
     assert len(d)==len(v)
-    visdom.histogram(d, win=0, opts=dict(title='hist errors'))
-    visdom.mesh(X=v, Y=f, win=1,opts=dict(opacity=1., title='deep tsdf denoising'))
-    visdom.mesh(X=v_gt, Y=f_gt, win=2,opts=dict(opacity=1., title='gt_tsdf'))
-    v,f,_,_ =  measure.marching_cubes_lewiner(tsdf_in, level=0., allow_degenerate=False)
-    visdom.mesh(X=v, Y=f, win=3,opts=dict(opacity=1., title='input tsdf'))
-    visdom.heatmap(tsdf_in[16,:,:], win=4,opts=dict(title='mid slice input tsdf'))
-    visdom.heatmap(voxels[16,:,:], win=5, opts=dict(title='mid slice output tsdf'))
+    if visdom is not None:
+        visdom.histogram(d, win=0, opts=dict(title='hist errors'))
+        visdom.mesh(X=v, Y=f, win=1,opts=dict(opacity=1., title='deep tsdf denoising'))
+        visdom.mesh(X=v_gt, Y=f_gt, win=2,opts=dict(opacity=1., title='gt_tsdf'))
+        v,f,_,_ =  measure.marching_cubes_lewiner(tsdf_in, level=0., allow_degenerate=False)
+        visdom.mesh(X=v, Y=f, win=3,opts=dict(opacity=1., title='input tsdf'))
+        visdom.heatmap(tsdf_in[16,:,:], win=4,opts=dict(title='mid slice input tsdf'))
+        visdom.heatmap(voxels[16,:,:], win=5, opts=dict(title='mid slice output tsdf'))
 
     return np.mean(d)
 

@@ -37,6 +37,10 @@ As a hello world I generate a TSDF from random ellipsoids in a 32^3 grid and add
 
 ![Alt Text](DeepTSDF.gif)
 
+## Known Issues
+Zero pad is not good for boundaries on the lowest level. Use voxel overlap (currently use replication padding)
+Use the prediction in the loss function (otherwise the net will always prefer to go the whole depth)
+Training - Should train layer by layer or depth first with subsampling to handle the large compute untill the prediction converges
 
 ## References
 TODO format this shit
