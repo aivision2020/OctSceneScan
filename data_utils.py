@@ -7,7 +7,7 @@ from skimage.draw import ellipsoid
 from scipy.spatial import KDTree
 import visdom
 
-def plotVoxelVisdom(GT_voxels, voxels, tsdf_in, visdom):
+def plotVoxelVisdom(GT_voxels, voxels, tsdf_in, compute, visdom):
     v,f,_,_ =  measure.marching_cubes_lewiner(voxels, level=0., allow_degenerate=False)
     v_gt,f_gt,_,_ =  measure.marching_cubes_lewiner(GT_voxels, level=0., allow_degenerate=False)
     kd = KDTree(v_gt)
@@ -21,6 +21,7 @@ def plotVoxelVisdom(GT_voxels, voxels, tsdf_in, visdom):
         visdom.mesh(X=v, Y=f, win=3,opts=dict(opacity=1., title='input tsdf'))
         visdom.heatmap(tsdf_in[16,:,:], win=4,opts=dict(title='mid slice input tsdf'))
         visdom.heatmap(voxels[16,:,:], win=5, opts=dict(title='mid slice output tsdf'))
+        visdom.heatmap(compute[16,:,:], win=6, opts=dict(title='mid slice output compute'))
 
     return np.mean(d)
 
