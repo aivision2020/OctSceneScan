@@ -8,7 +8,7 @@ from model import *
 from data_utils import *
 
 
-feature_dim = 32
+feature_dim = 16
 block_size = 32
 def test_bottom_level():
     tsdf = [torch.from_numpy(np.random.rand(1,1,32,32,32)).float()]
@@ -90,6 +90,9 @@ def test_criteria():
     assert len(criteria.gt_octree)==2
     assert len(criteria.gt_octree[0])==8, len(criteria.gt_octree[0])
     assert len(criteria.gt_octree[1])==1, len(criteria.gt_octree[1])
+    for l, level in enumerate(criteria.gt_octree):
+        for k, v in level.items():
+            assert v.dim()>0, (l,k, v)
 
 def test_simple_net_single_data():
     data = TsdfGenerator(block_size, sigma=0.9)
@@ -197,7 +200,7 @@ def test_2tier_net_single_data():
     assert err<1
 
 def test_2tier_net(res=64, block_size=block_size):
-    dataset = TsdfGenerator(res, n_elips=3, sigma=0.9,epoch_size=1000)
+    dataset = TsdfGenerator(res, n_elips=3, sigma=0.9,epoch_size=10000)
     train_loader = torch.utils.data.DataLoader(dataset, batch_size=1,
             num_workers=8)
 
@@ -238,7 +241,7 @@ def test_2tier_net(res=64, block_size=block_size):
         print it, loss.data
         print 'timming:{}. forward {}, loss {}, back {}'.format(t-last_t, forward_t, loss_t, back_t)
         last_t = t
-        if (it)%50==0:
+        if (it+1)%200==0:
             mod.eval()
             out = mod(tsdf)
             for i, l in enumerate(pred):
@@ -272,6 +275,7 @@ def test_split_subtree():
     assert feat[0,0,8,0,0]==12.13
 
 if __name__=='__main__':
+    #test_criteria()
     #test_bottom_level()
     #test_mid_level()
     #test_convtrans()

@@ -35,12 +35,19 @@ If i is the last level, the input TSDF should already be 32^3 and and we should 
 ## Hello World
 As a hello world I generate a TSDF from random ellipsoids in a 32^3 grid and add gaussian noise. This is small enough to run a full 3D conv net (no hyrarchy, no dynamic branching…)
 
-![Alt Text](DeepTSDF.gif)
+![Alt Text](images/DeepTSDF.gif)
 
 ## Two levels
 Generate a TSDF from random ellipsoids in a 64^3 grid and add gaussian noise. This is the limit of what can be run brute force  on a single GPU (no early branch termination, no prediction yet)
 
-![Alt Text](64_cube.png)
+![Alt Text](images/64_cube.png)
+
+## Three levels
+Moving on to 3 levels of 32^3 each = 128^3 grid. Durring training we randomly select branches to train on to avoid chocking the GPU while the net learns. 
+Loss function is also computed on the octtree
+
+![Alt Text](images/cube_128.png)
+
 
 ## Known Issues
 Zero pad is not good for boundaries on the lowest level. Use voxel overlap (currently use replication padding)  
@@ -48,6 +55,10 @@ Outpud is not smooth around block edges. Using splits with outverlap should solv
 Use the prediction in the loss function (otherwise the net will always prefer to go the whole depth)  
 Training - Should train layer by layer or depth first with subsampling to handle the large compute untill the prediction converges  
 output is blocky. Since output is a classification with dont get the sub-voxel accuracy that could be achieved (see GT ellipsoids)  
+Need to move gt octree compute into TSDFGenerator to aoid bottleneck while training  
+Output is blocky. Maybe becase cell boundary padding?   
+
+
 
 ## References
 author = {Wang, Peng-shuai and Wang, Peng-Shuai and Liu, Yang and Guo, Yu-Xiao and Sun, Chun-Yu and Tong, Xin},  
