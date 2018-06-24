@@ -118,7 +118,7 @@ class MidLevel(nn.Module):
         assert type(tsdf_pyramid)==list
         assert type(prev)==dict
         prevs = {X:self.upsample(p) for X,p in prev.iteritems()}
-        tsdfs = {(x,y,z): tsdf_pyramid[-1][:,
+        tsdfs = {(x,y,z): tsdf_pyramid[-1][:,:,
             x*self.block_size:(x+1)*self.block_size,
             y*self.block_size:(y+1)*self.block_size,
             z*self.block_size:(z+1)*self.block_size]
@@ -131,7 +131,7 @@ class MidLevel(nn.Module):
         #durring training continue down the octree randomly (sampled toward
         #cells with boundaries
         if self.training:
-            p_tot = np.sum([p[0,-1].detach() for p in pred.values()])
+            p_tot = torch.Tensor([p[0,-1] for p in pred.values()]).sum().cuda()
             mixed = [X for X,p in pred.iteritems() if p[0,-1]/p_tot > np.random.rand()]
         else:
             #durring test time continue to refine only boundary cells
@@ -204,10 +204,16 @@ class OctreeCrossEntropyLoss(nn.Module):
                         else:
                             #all labels are the same, and are either -1 or 1.
                             #so (label+1)/2 is 0 or 1
-                            self.gt_octree[level][(x,y,z)]=(label[0,0,0,0]+1)/2
+                            self.gt_octree[level][(x,y,z)]=torch.Tensor([(label[0,0,0,0]+1)/2,]).cuda().long()
 
     def loss_singles(self, l, gt, bs):
-        return self.criteria(l, gt)*bs**3
+        assert gt.numel()>0, l.numel()>0
+        try:
+            ret = self.criteria(l, gt)*bs**3
+            return ret
+        except:
+            import ipdb; ipdb.set_trace()
+            print 'something is wrong'
 
     def loss_full_single(self, l, gt):
         try:
