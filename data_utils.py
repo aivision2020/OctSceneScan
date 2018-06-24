@@ -7,23 +7,28 @@ from skimage.draw import ellipsoid
 from scipy.spatial import KDTree
 import visdom
 
-def plotVoxelVisdom(GT_voxels, voxels, tsdf_in, compute, visdom):
-    v,f,_,_ =  measure.marching_cubes_lewiner(voxels, level=0., allow_degenerate=False)
+def plotVoxelVisdom(GT_voxels, voxels, tsdf_in, visdom):
     v_gt,f_gt,_,_ =  measure.marching_cubes_lewiner(GT_voxels, level=0., allow_degenerate=False)
-    kd = KDTree(v_gt)
-    d,ind = kd.query(v)
-    assert len(d)==len(v)
-    if visdom is not None:
-        visdom.histogram(d, win=0, opts=dict(title='hist errors'))
-        visdom.mesh(X=v, Y=f, win=1,opts=dict(opacity=1., title='deep tsdf denoising'))
-        visdom.mesh(X=v_gt, Y=f_gt, win=2,opts=dict(opacity=1., title='gt_tsdf'))
-        v,f,_,_ =  measure.marching_cubes_lewiner(tsdf_in, level=0., allow_degenerate=False)
-        visdom.mesh(X=v, Y=f, win=3,opts=dict(opacity=1., title='input tsdf'))
-        visdom.heatmap(tsdf_in[16,:,:], win=4,opts=dict(title='mid slice input tsdf'))
-        visdom.heatmap(voxels[16,:,:], win=5, opts=dict(title='mid slice output tsdf'))
-        visdom.heatmap(compute[16,:,:], win=6, opts=dict(title='mid slice output compute'))
+    res = voxels.shape[-1]
+    if voxels.min()<0 and voxels.max()>0:
+        v,f,_,_ =  measure.marching_cubes_lewiner(voxels, level=0., allow_degenerate=False)
+        kd = KDTree(v_gt)
+        d,ind = kd.query(v)
+        assert len(d)==len(v)
+        if visdom is not None:
+            visdom.histogram(d, win=0, opts=dict(title='hist errors'))
+            visdom.mesh(X=v, Y=f, win=1,opts=dict(opacity=1., title='deep tsdf denoising'))
+            visdom.mesh(X=v_gt, Y=f_gt, win=2,opts=dict(opacity=1., title='gt_tsdf'))
+            v,f,_,_ =  measure.marching_cubes_lewiner(tsdf_in, level=0., allow_degenerate=False)
+            visdom.mesh(X=v, Y=f, win=3,opts=dict(opacity=1., title='input tsdf'))
+            visdom.heatmap(tsdf_in[res/2,:,:], win=4,opts=dict(title='mid slice input tsdf'))
+            visdom.heatmap(voxels[res/2,:,:], win=5, opts=dict(title='mid slice output tsdf x'))
+            visdom.heatmap(voxels[:,res/2,:], win=6, opts=dict(title='mid slice output tsdf y'))
 
-    return np.mean(d)
+        return np.mean(d)
+    else:
+        print 'visdom cant render empy tsdf'
+    return None
 
 class TsdfGenerator(torch.utils.data.Dataset):
     def __init__(self, res=512, n_elips=1, sigma=0.1, epoch_size=1000):
