@@ -27,7 +27,7 @@ def plotVoxelVisdom(GT_voxels, voxels, tsdf_in, visdom):
 
         return np.mean(d)
     else:
-        print 'visdom cant render empy tsdf'
+        print( 'visdom cant render empy tsdf')
     return None
 
 class TsdfGenerator(torch.utils.data.Dataset):

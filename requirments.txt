@@ -1,0 +1,7 @@
+numpy
+sckikit-image
+torch
+torchvision
+visdom
+pytest
+ipdb

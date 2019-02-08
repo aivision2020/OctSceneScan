@@ -76,4 +76,9 @@ title = {{Hierarchical Surface Prediction for 3D Object Reconstruction}}
 author = {Facebook, Benjamin Graham and Research, Ai and Engelcke, Martin and {Van Der Maaten}, Laurens},  
 title = {{3D Semantic Segmentation with Submanifold Sparse Convolutional Networks}}  
   
+## Install
+pip install -r requirments.txt
 
+don't forget to loanch visdom (just type visdom to cmd)
+
+run visdom

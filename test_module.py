@@ -7,7 +7,7 @@ from torch.autograd import Variable
 from model import *
 from data_utils import *
 
-
+device = torch.device('cpu')
 feature_dim = 16
 block_size = 32
 def test_bottom_level():
@@ -25,12 +25,14 @@ def test_bottom_level():
     assert out[X].sum(dim=1).max()>.99
 
 def test_mid_level():
-    tsdf = [torch.rand(1,1,64,64,64).float().cuda()]
+    tsdf = [torch.rand(1,1,64,64,64).float(device=device)]
     tsdf_down = nn.AvgPool3d(kernel_size=2)
     while tsdf[-1].shape[-1]>block_size:
         tsdf.append(tsdf_down(tsdf[-1]))
-    prev = {(0,0,0):torch.rand(1,32,block_size/2,block_size/2,block_size/2).float().cuda()}
-    mod = MidLevel(64, 32,32,BottomLevel(32, block_size=block_size), block_size=block_size).cuda()
+    prev = {(0,0,0):torch.rand(1,32,block_size/2,block_size/2,block_size/2).float(device=device)}
+    mod = MidLevel(64, 32,32,BottomLevel(32, block_size=block_size), block_size=block_size)
+    if device=='cuda':
+        mod.cuda()
     out = mod(tsdf,prev)
     assert type(out)==list
     assert type(out[0])==dict
@@ -67,7 +69,7 @@ def test_ellipsoid():
     assert arr.shape==(23,23,23), arr.shape
     dist =  np.sqrt(11**2*3)-10
     assert np.abs(arr[0,0,0]) > dist , ( arr[0,0,0], dist)
-    print arr[0,0,0], dist
+    print( arr[0,0,0], dist)
 
 
     a,b,c = 10,15,25
@@ -85,7 +87,7 @@ def test_criteria():
     assert np.abs(tsdf_in).max()<33
     gt_label = np.zeros_like(gt)
     gt_label[gt>=0]=1
-    gt_label = torch.from_numpy(gt_label.astype(int)).cuda()
+    gt_label = torch.from_numpy(gt_label.astype(int)).device(device)
     criteria = OctreeCrossEntropyLoss(gt_label, block_size)
     assert len(criteria.gt_octree)==2
     assert len(criteria.gt_octree[0])==8, len(criteria.gt_octree[0])
@@ -102,14 +104,14 @@ def test_simple_net_single_data():
     assert np.abs(tsdf_in).max()<33
     gt_label = np.zeros_like(gt)
     gt_label[gt>=0]=1
-    gt_label = torch.from_numpy(gt_label.astype(int)).cuda()
-    tsdf = [torch.from_numpy(copy.copy(tsdf_in)[None,:]).float().cuda()]
-    prev = {(0,0,0):torch.rand(1,32,block_size/2,block_size/2,block_size/2).float().cuda()}
+    gt_label = torch.from_numpy(gt_label.astype(int)).device(device)
+    tsdf = [torch.from_numpy(copy.copy(tsdf_in)[None,:]).float().device(device)]
+    prev = {(0,0,0):torch.rand(1,32,block_size/2,block_size/2,block_size/2).float().device(device)}
     assert tsdf[0].shape == (1,1,block_size,block_size,block_size)
     assert gt_label.shape==(1,block_size,block_size,block_size)
     criteria = OctreeCrossEntropyLoss(gt_label, block_size)
     mod = BottomLevel(feature_dim, block_size)
-    mod.cuda()
+    mod.device(device)
     optimizer = optim.Adam(mod.parameters(), lr=0.001)#, momentum=0.9)
     for it in range(1,100):
         out = mod(tsdf,prev)
@@ -121,12 +123,12 @@ def test_simple_net_single_data():
         optimizer.step()
         if (it+1)%10==0:
             sdf_=octree_to_sdf(out, block_size)
-            print 'level ', np.count_nonzero(sdf_==1)
+            print ('level ', np.count_nonzero(sdf_==1))
             err = plotVoxelVisdom(gt[0], sdf_, tsdf_in[0], vis)
             assert np.abs(tsdf_in).max()<33
-            print err
+            print (err)
 
-        print it, loss
+        print( it, loss)
     assert err < 1
 
 def test_bottom_layer():
@@ -136,27 +138,28 @@ def test_bottom_layer():
 
     vis = visdom.Visdom()
     mod = BottomLevel(feature_dim, block_size)
-    mod.cuda()
+    mod.device(device)
     optimizer = optim.SGD(mod.parameters(), lr=0.1, momentum=0.9)
     for it, (gt, tsdf_in) in enumerate(train_loader):
         assert np.abs(tsdf_in).max()<33
         assert gt.max()>1 and gt.min()<-1
         gt_label = torch.zeros_like(gt)
         gt_label[gt>=0]=1
-        gt_label = gt_label.long().cuda()
-        tsdf = [tsdf_in.float().cuda()]
-        prev = {(0,0,0): torch.zeros(1,feature_dim,block_size/2,block_size/2,block_size/2).float().cuda()}
+        gt_label = gt_label.long().device(device)
+        tsdf = [tsdf_in.float().device(device)]
+        prev = {(0,0,0):
+                torch.zeros(1,feature_dim,block_size/2,block_size/2,block_size/2).float().device(device)}
         out = mod(tsdf,prev)
         criteria = OctreeCrossEntropyLoss(gt_label, block_size)
         loss = criteria(out)
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
-        print it, loss
+        print( it, loss)
         if it%50==0:
             sdf_=octree_to_sdf(out, block_size)
             err = plotVoxelVisdom(gt[0].numpy(), sdf_, tsdf_in[0][0].numpy(), vis)
-            print it, err
+            print( it, err)
     assert err<1
 
 def test_2tier_net_single_data():
@@ -165,7 +168,8 @@ def test_2tier_net_single_data():
 
     vis = visdom.Visdom()
     mod = TopLevel(feature_dim,BottomLevel(feature_dim, block_size), block_size=block_size)
-    mod.cuda()
+    if device=='cuda':
+        mod.cuda()
     optimizer = optim.Adam(mod.parameters(), lr=0.1)#, momentum=0.9)
     gt, tsdf_in = dataset.__getitem__(0)
     assert np.abs(tsdf_in).max()<33
@@ -173,9 +177,9 @@ def test_2tier_net_single_data():
     gt = torch.from_numpy(gt[None,:])
     gt_label = torch.zeros_like(gt)
     gt_label[gt>=0]=1
-    gt_label = gt_label.long().cuda()
+    gt_label = gt_label.long(device=device)
     criteria = OctreeCrossEntropyLoss(gt_label, block_size)
-    tsdf = torch.from_numpy(copy.copy(tsdf_in)[None,:]).float().cuda()
+    tsdf = torch.from_numpy(copy.copy(tsdf_in)[None,:]).float(device=device)
     last_out=None
     for it in range(500):
         out = mod(tsdf)
@@ -189,14 +193,14 @@ def test_2tier_net_single_data():
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
-        print it, loss
+        print( it, loss)
         if (it+1)%10==0:
             mod.eval()
             out = mod(tsdf)
             sdf_=octree_to_sdf(out, block_size)
             err = plotVoxelVisdom(gt[0].numpy(), sdf_, tsdf_in[0], vis)
             mod.train()
-            print it, err
+            print( it, err)
     assert err<1
 
 def test_2tier_net(res=64, block_size=block_size):
@@ -208,21 +212,23 @@ def test_2tier_net(res=64, block_size=block_size):
     layers = []
     layers.append(BottomLevel(feature_dim, block_size))
     while block_size*2**len(layers)<=res/2:
-        print 'adding mid layer', len(layers)
+        print( 'adding mid layer', len(layers))
         layers.append(MidLevel(feature_dim, feature_dim, layers[-1],
             block_size, thresh=0.1))
     mod = TopLevel(feature_dim, layers[-1], block_size=block_size)
-    mod.cuda()
+    device = torch.device('cpu')
+    if device=='cuda':
+        mod.cuda()
     optimizer = optim.Adam(mod.parameters(), lr=0.001)#, momentum=0.9)
     last_t = time.time()
     for it, (gt, tsdf_in) in enumerate(train_loader):
         assert np.abs(tsdf_in).max()<33
         assert gt.max()>1 and gt.min()<-1
-        gt_label = torch.zeros_like(gt)
+        gt_label = torch.zeros_like(gt, device=device)
         gt_label[gt>=0]=1
-        gt_label = gt_label.long().cuda()
+        gt_label = gt_label.long()
         criteria = OctreeCrossEntropyLoss(gt_label, block_size)
-        tsdf = tsdf_in.float().cuda()
+        tsdf = tsdf_in.float()
         t = time.time()
         pred = mod(tsdf)
         forward_t = time.time()-t
@@ -232,28 +238,31 @@ def test_2tier_net(res=64, block_size=block_size):
         t=time.time()
         for i, l in enumerate(pred):
             resample = (2**i)
-            print 'level %d, %d/%d trained'%( i, len(l), (res/block_size/resample)**3)
+            print( 'level %d, %d/%d trained'%( i, len(l),
+                    (res/block_size/resample)**3))
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
         back_t = time.time()-t
         t=time.time()
-        print it, loss.data
-        print 'timming:{}. forward {}, loss {}, back {}'.format(t-last_t, forward_t, loss_t, back_t)
+        print( it, loss.data)
+        print( 'timming:{}. forward {}, loss {}, back {}'.format(t-last_t,
+                forward_t, loss_t, back_t))
         last_t = t
         if (it+1)%200==0:
             mod.eval()
             out = mod(tsdf)
             for i, l in enumerate(pred):
                 resample = (2**i)
-                print 'Eval: level %d, %d/%d evaluated'%( i, len(l), (res/block_size/resample)**3)
+                print( 'Eval: level %d, %d/%d evaluated'%( i, len(l),
+                        (res/block_size/resample)**3))
             sdf_=octree_to_sdf(out, block_size)
-            print gt[0].shape
-            print sdf_.shape
-            print tsdf_in[0][0].shape
+            print( gt[0].shape)
+            print( sdf_.shape)
+            print( tsdf_in[0][0].shape)
             err = plotVoxelVisdom(gt[0].numpy(), sdf_, tsdf_in[0][0].numpy(), vis)
             mod.train()
-            print it, err
+            print( it, err)
     assert err<1
 
 
@@ -266,7 +275,7 @@ def test_2tier_net(res=64, block_size=block_size):
 #    return subtree
 
 def test_split_subtree():
-    feat = torch.rand(1,32,16,16,16).float().cuda()
+    feat = torch.rand(1,32,16,16,16).float(device=device)
     split = split_tree(feat)
     assert len(split)==8, len(split)
     assert np.all(split[(0,0,0)][0,:,0,0,0]==feat[0,:,0,0,0])
@@ -282,5 +291,5 @@ if __name__=='__main__':
     #test_bottome_layer()
     #test_2tier_net_single_data()
     #test_criteria()
-    #test_2tier_net(res=64, block_size=32)
-    test_2tier_net(res=128, block_size=32)
+    test_2tier_net(res=64, block_size=32)
+    #test_2tier_net(res=128, block_size=32)

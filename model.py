@@ -4,6 +4,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 
+
+device = 'cpu'
 class BasicBlock(nn.Module):
     def __init__(self, inplane, outplane, upsample=False, bn=True):
         super(BasicBlock,self).__init__()
@@ -43,7 +45,7 @@ class Debug(nn.Module):
     def forward(self, input):
         #import ipdb; ipdb.set_trace()
         zeros = float(np.count_nonzero(input==0))/input.numel()
-        print self.str, input.shape, zeros
+        print( self.str, input.shape, zeros)
         #if zeros>0.45:
         #    import ipdb; ipdb.set_trace()
         return input
@@ -53,14 +55,14 @@ class PredictionBlock(nn.Module):
     def __init__(self, inplane, n_class, bn=True):
         super(PredictionBlock,self).__init__()
         modules = []
-        modules.append( nn.Conv3d(inplane, inplane/2, kernel_size=3, stride=1,
+        modules.append( nn.Conv3d(inplane, inplane//2, kernel_size=3, stride=1,
             padding=0, bias=False))
-        modules.append( nn.BatchNorm3d(inplane/2))
+        modules.append( nn.BatchNorm3d(inplane//2))
         modules.append( nn.ReLU(inplace=True))
         modules.append( nn.MaxPool3d(kernel_size=3))
-        modules.append( nn.Conv3d( inplane/2, inplane/4, kernel_size=3, stride=1,
+        modules.append( nn.Conv3d( inplane//2, inplane//4, kernel_size=3, stride=1,
             padding=0, bias=False))
-        modules.append( nn.BatchNorm3d(inplane/4))
+        modules.append( nn.BatchNorm3d(inplane//4))
         modules.append( nn.ReLU(inplace=True))
         modules.append( nn.MaxPool3d(kernel_size=4))
         modules.append( Flatten())
@@ -88,19 +90,19 @@ class BottomLevel(nn.Module):
         assert len(tsdf_pyramid)==1
         assert tsdf_pyramid[-1].shape[0]==1
         assert type(tsdf_pyramid) == list
-        prevs = {X:self.upsample(p) for X,p in prev.iteritems()}
+        prevs = {X:self.upsample(p) for X,p in prev.items()}
         tsdfs_in = {(x,y,z):
                 tsdf_pyramid[-1][:,:,
                     x*self.block_size:(x+1)*self.block_size,
                     y*self.block_size:(y+1)*self.block_size,
                     z*self.block_size:(z+1)*self.block_size]
                 for (x,y,z) in prevs.keys()}
-        tsdfs = {X:self.tsdf_block(T) for X,T in tsdfs_in.iteritems()}
+        tsdfs = {X:self.tsdf_block(T) for X,T in tsdfs_in.items()}
         out   = {X:torch.cat((prevs[X], tsdfs[X]) ,dim=1) for X in prevs.keys()}
-        feat1  = {X:self.block1(T) for X,T in out.iteritems()}
-        feat  = {X:self.block2(T) for X,T in feat1.iteritems()}
-        pred1  = {X:self.pred(T) for X,T in feat.iteritems()}
-        pred  = {X:self.softmax(T) for X,T in pred1.iteritems()}
+        feat1  = {X:self.block1(T) for X,T in out.items()}
+        feat  = {X:self.block2(T) for X,T in feat1.items()}
+        pred1  = {X:self.pred(T) for X,T in feat.items()}
+        pred  = {X:self.softmax(T) for X,T in pred1.items()}
         return [pred]
 
 class MidLevel(nn.Module):
@@ -117,38 +119,38 @@ class MidLevel(nn.Module):
     def forward(self,tsdf_pyramid, prev):
         assert type(tsdf_pyramid)==list
         assert type(prev)==dict
-        prevs = {X:self.upsample(p) for X,p in prev.iteritems()}
+        prevs = {X:self.upsample(p) for X,p in prev.items()}
         tsdfs = {(x,y,z): tsdf_pyramid[-1][:,:,
             x*self.block_size:(x+1)*self.block_size,
             y*self.block_size:(y+1)*self.block_size,
             z*self.block_size:(z+1)*self.block_size]
             for (x,y,z) in prevs.keys()}
-        tsdfs = {X:self.tsdf_block(T) for X,T in tsdfs.iteritems()}
+        tsdfs = {X:self.tsdf_block(T) for X,T in tsdfs.items()}
         out = {X:torch.cat((prevs[X], tsdfs[X]) ,dim=1) for X in prevs.keys()}
-        feat = {X:self.block1(T) for X,T in out.iteritems()}
-        pred = {X:self.pred(T) for X,T in feat.iteritems()}
+        feat = {X:self.block1(T) for X,T in out.items()}
+        pred = {X:self.pred(T) for X,T in feat.items()}
 
         #durring training continue down the octree randomly (sampled toward
         #cells with boundaries
         if self.training:
-            p_tot = torch.Tensor([p[0,-1] for p in pred.values()]).sum().cuda()
-            mixed = [X for X,p in pred.iteritems() if p[0,-1]/p_tot > np.random.rand()]
+            p_tot = torch.Tensor([p[0,-1] for p in pred.values()],device=device).sum()
+            mixed = [X for X,p in pred.items() if p[0,-1]/p_tot > np.random.rand()]
         else:
             #durring test time continue to refine only boundary cells
-            mixed = [X for X,p in pred.iteritems() if p[0,-1] > self.thresh]
+            mixed = [X for X,p in pred.items() if p[0,-1] > self.thresh]
 
         refine = {}
         for x,y,z in mixed:
-            refine.update(split_tree(feat[X],x,y,z))
+            refine.update(split_tree(feat[(x,y,z)],x,y,z))
         return self.sub_level(tsdf_pyramid[:-1], refine) +[pred]
 
 def split_tree(feat, parent_x=0, parent_y=0, parent_z=0):
     block_size=feat.shape[-1]
     assert feat.shape[-1] == feat.shape[-2] == feat.shape[-3]
     subtree = {}
-    for x,feat_x in enumerate(torch.split(feat,block_size/2,2)):
-        for y,feat_y in enumerate(torch.split(feat_x,block_size/2,3)):
-            for z,feat_z in enumerate(torch.split(feat_y,block_size/2,4)):
+    for x,feat_x in enumerate(torch.split(feat,block_size//2,2)):
+        for y,feat_y in enumerate(torch.split(feat_x,block_size//2,3)):
+            for z,feat_z in enumerate(torch.split(feat_y,block_size//2,4)):
                 subtree[(parent_x*2+x,parent_y*2+y,parent_z*2+z)]=feat_z
     return subtree
 
@@ -188,7 +190,7 @@ class OctreeCrossEntropyLoss(nn.Module):
         self.gt_octree = [{} for _ in range(self.max_level+1)] #each level is a dictionary
         for level in range(self.max_level,-1,-1):
             bs = block_size*np.power(2,level)
-            num_blocks = gt_label.shape[-1]/bs
+            num_blocks = gt_label.shape[-1]//bs
             for x in range(num_blocks):
                 for y in range(num_blocks):
                     for z in range(num_blocks):
@@ -200,11 +202,11 @@ class OctreeCrossEntropyLoss(nn.Module):
                             if level==0:
                                 self.gt_octree[level][(x,y,z)]=label
                             else:
-                                self.gt_octree[level][(x,y,z)]=torch.Tensor([2,]).cuda().long()
+                                self.gt_octree[level][(x,y,z)]=torch.Tensor([2,],device=device).long()
                         else:
                             #all labels are the same, and are either -1 or 1.
                             #so (label+1)/2 is 0 or 1
-                            self.gt_octree[level][(x,y,z)]=torch.Tensor([(label[0,0,0,0]+1)/2,]).cuda().long()
+                            self.gt_octree[level][(x,y,z)]=torch.Tensor([(label[0,0,0,0]+1)//2,],device=device).long()
 
     def loss_singles(self, l, gt, bs):
         assert gt.numel()>0, l.numel()>0
@@ -213,37 +215,37 @@ class OctreeCrossEntropyLoss(nn.Module):
             return ret
         except:
             import ipdb; ipdb.set_trace()
-            print 'something is wrong'
+            print( 'something is wrong')
 
     def loss_full_single(self, l, gt):
         try:
             return self.criteria(l,torch.ones_like(l[:,0]).long()*gt)
         except:
-            print 'something is wrong'
+            print( 'something is wrong')
             import ipdb; ipdb.set_trace()
 
     def loss_single_full(self, l, gt, bs):
         try:
-            loss = self.criteria(l,torch.ones(1).cuda().long()*2)
+            loss = self.criteria(l,torch.ones(1,device=device).long()*2)
             return loss
         except:
-            print 'something is wrong'
+            print( 'something is wrong')
             import ipdb; ipdb.set_trace()
 
     def loss_fulls(self, l, gt):
         try:
             return self.criteria(l, gt)
         except:
-            print 'something is wrong'
+            print( 'something is wrong')
             import ipdb; ipdb.set_trace()
 
     def forward(self, octree):
         assert len(octree)<=len(self.gt_octree), (len(octree), len(self.gt_octree))
-        ret = torch.zeros(1).cuda().squeeze()
+        ret = torch.zeros(1,device=device).squeeze()
         for level in range(len(octree)-1,-1,-1):
             bs = self.block_size*np.power(2,level)
             assert type(octree[level])==dict, (level, octree[level])
-            for X,label in octree[level].iteritems():
+            for X,label in octree[level].items():
                 gt = self.gt_octree[level][X]
                 assert type(gt)==torch.Tensor
                 if gt.numel()==1:
@@ -265,7 +267,7 @@ def octree_to_sdf(octree, block_size):
     sdf = np.zeros((dim, dim, dim))
     for level in range(len(octree)-1,-1,-1):
         bs = block_size*np.power(2,level)
-        for (x,y,z),label in octree[level].iteritems():
+        for (x,y,z),label in octree[level].items():
             if label.numel()==1:
                 sdf[x*bs:(x+1)*bs, y*bs:(y+1)*bs, z*bs:(z+1)*bs] = label
             if label.numel()==3 and torch.argmax(label)!=2:
