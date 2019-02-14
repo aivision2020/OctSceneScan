@@ -1,5 +1,5 @@
 numpy
-sckikit-image
+scikit-image
 torch
 torchvision
 visdom

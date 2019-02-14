@@ -11,17 +11,18 @@ each level l
 TSDF - @full resolution converting 2^-l of the entire scene (in each dimension). Join with previous feature block (if exists) and compute the termination criteria with is a prediction whether the scene surface intersects this block. if yes, the call next level 2^3 times for each sub-block. If this is the finest level, then just compute the full res prediction
 
 
-Example. Assume input TSDF is 512 (for simplicity input is always a power of 2). and we use feature embedding of D = 128
+Example. Assume input TSDF is 512 (for simplicity input is always a power of 2). and we use feature embedding of D = 128 and BS (block size) = 32
+32*2^4=512. So in out example out net should have max_levels=4 
 
-level 0 - called once with TSDF Block size 512^3.  
+level 4 - called once with TSDF Block size 512^3.  
   downsample TSDF to 32^2 and processed to create feature block F sized Dx32x32x32
 	 slice TSDF and F into 8 , indexed x,y,z in {0,1}^3
 	 for x,y,z :
 		  output(x,y,z) <- level i+1 with TSDF(x,y,z) and F(x,y,z) - sized 216^3 and 16^3
   return output
 
-level i: called up to 2^3^i time with TSDF block size (512/2^i)^3 and F size DX16^3
-  Down sample input TSDF to 32^3 and join with F and predict P(Inside, Outside, Surface) 
+level i: called up to 2^3^(max_levels-i) time with TSDF block size 512/2^(max_levels-i)^3 and F size DX16^3
+  Down sample input TSDF to 32^3, Upsample F to 32^3 and make prediction predict P(Inside, Outside, Surface) 
 	 if P(Surface) < some thresh:
 		  return ones_like(TSDF) * argmax(P)
    else:
@@ -30,7 +31,7 @@ level i: called up to 2^3^i time with TSDF block size (512/2^i)^3 and F size DX1
       output(x,y,z) <- level i+1 with TSDF(x,y,z) and F(x,y,z)
 		  return output
 
-If i is the last level, the input TSDF should already be 32^3 and and we should not call the next level. Instead the prediction block is a simple 3D convnet that should output the surface prediction at the input TSDF resolution: 3x32^3
+0 is the last level. The input TSDF should already be 32^3 and and we should not call the next level. Instead the prediction block is a simple 3D convnet that should output the surface prediction at the input TSDF resolution: 3x32^3
 
 ## Hello World
 As a hello world I generate a TSDF from random ellipsoids in a 32^3 grid and add gaussian noise. This is small enough to run a full 3D conv net (no hyrarchy, no dynamic branching…)
@@ -79,6 +80,5 @@ title = {{3D Semantic Segmentation with Submanifold Sparse Convolutional Network
 ## Install
 pip install -r requirments.txt
 
-don't forget to loanch visdom (just type visdom to cmd)
+don't forget to launch visdom (just type visdom to cmd)
 
-run visdom

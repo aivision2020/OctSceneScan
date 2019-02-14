@@ -21,9 +21,9 @@ def plotVoxelVisdom(GT_voxels, voxels, tsdf_in, visdom):
             visdom.mesh(X=v_gt, Y=f_gt, win=2,opts=dict(opacity=1., title='gt_tsdf'))
             v,f,_,_ =  measure.marching_cubes_lewiner(tsdf_in, level=0., allow_degenerate=False)
             visdom.mesh(X=v, Y=f, win=3,opts=dict(opacity=1., title='input tsdf'))
-            visdom.heatmap(tsdf_in[res/2,:,:], win=4,opts=dict(title='mid slice input tsdf'))
-            visdom.heatmap(voxels[res/2,:,:], win=5, opts=dict(title='mid slice output tsdf x'))
-            visdom.heatmap(voxels[:,res/2,:], win=6, opts=dict(title='mid slice output tsdf y'))
+            visdom.heatmap(tsdf_in[res//2,:,:], win=4,opts=dict(title='mid slice input tsdf'))
+            visdom.heatmap(voxels[res//2,:,:], win=5, opts=dict(title='mid slice output tsdf x'))
+            visdom.heatmap(voxels[:,res//2,:], win=6, opts=dict(title='mid slice output tsdf y'))
 
         return np.mean(d)
     else:

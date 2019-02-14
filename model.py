@@ -5,7 +5,7 @@ import torch.nn.functional as F
 import numpy as np
 
 
-device = 'cpu'
+device = 'cuda'
 class BasicBlock(nn.Module):
     def __init__(self, inplane, outplane, upsample=False, bn=True):
         super(BasicBlock,self).__init__()
@@ -133,7 +133,8 @@ class MidLevel(nn.Module):
         #durring training continue down the octree randomly (sampled toward
         #cells with boundaries
         if self.training:
-            p_tot = torch.Tensor([p[0,-1] for p in pred.values()],device=device).sum()
+            p_tot = torch.Tensor([p[0,-1] for p in
+                pred.values()]).to(device).sum()
             mixed = [X for X,p in pred.items() if p[0,-1]/p_tot > np.random.rand()]
         else:
             #durring test time continue to refine only boundary cells
@@ -202,11 +203,11 @@ class OctreeCrossEntropyLoss(nn.Module):
                             if level==0:
                                 self.gt_octree[level][(x,y,z)]=label
                             else:
-                                self.gt_octree[level][(x,y,z)]=torch.Tensor([2,],device=device).long()
+                                self.gt_octree[level][(x,y,z)]=torch.ones([1],device=device).long()*2
                         else:
                             #all labels are the same, and are either -1 or 1.
                             #so (label+1)/2 is 0 or 1
-                            self.gt_octree[level][(x,y,z)]=torch.Tensor([(label[0,0,0,0]+1)//2,],device=device).long()
+                            self.gt_octree[level][(x,y,z)]=torch.ones([1],device=device).long()*(label[0,0,0,0]+1)//2
 
     def loss_singles(self, l, gt, bs):
         assert gt.numel()>0, l.numel()>0
@@ -268,6 +269,7 @@ def octree_to_sdf(octree, block_size):
     for level in range(len(octree)-1,-1,-1):
         bs = block_size*np.power(2,level)
         for (x,y,z),label in octree[level].items():
+            label=label.cpu()
             if label.numel()==1:
                 sdf[x*bs:(x+1)*bs, y*bs:(y+1)*bs, z*bs:(z+1)*bs] = label
             if label.numel()==3 and torch.argmax(label)!=2:
