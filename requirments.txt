@@ -5,3 +5,7 @@ torchvision
 visdom
 pytest
 ipdb
+autopep8
+opencv-python
+matplolib
+plotly
