@@ -9,6 +9,9 @@ import visdom
 
 def plotVoxelVisdom(GT_voxels, voxels, tsdf_in, visdom):
     v_gt,f_gt,_,_ =  measure.marching_cubes_lewiner(GT_voxels, level=0., allow_degenerate=False)
+    if visdom is not None:
+        visdom.mesh(X=v_gt, Y=f_gt, win=2,opts=dict(opacity=1., title='gt_tsdf'))
+
     res = voxels.shape[-1]
     if voxels.min()<0 and voxels.max()>0:
         v,f,_,_ =  measure.marching_cubes_lewiner(voxels, level=0., allow_degenerate=False)
@@ -18,7 +21,6 @@ def plotVoxelVisdom(GT_voxels, voxels, tsdf_in, visdom):
         if visdom is not None:
             visdom.histogram(d, win=0, opts=dict(title='hist errors'))
             visdom.mesh(X=v, Y=f, win=1,opts=dict(opacity=1., title='deep tsdf denoising'))
-            visdom.mesh(X=v_gt, Y=f_gt, win=2,opts=dict(opacity=1., title='gt_tsdf'))
             v,f,_,_ =  measure.marching_cubes_lewiner(tsdf_in, level=0., allow_degenerate=False)
             visdom.mesh(X=v, Y=f, win=3,opts=dict(opacity=1., title='input tsdf'))
             visdom.heatmap(tsdf_in[res//2,:,:], win=4,opts=dict(title='mid slice input tsdf'))

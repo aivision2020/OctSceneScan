@@ -5,6 +5,11 @@ Welcome to my side project for 3D Scene handling. Recently 3D conv have been dom
 There are a few papers that handle this using the sparsity in 3D such as octnet[]. Genereally these require knowledge of the sparsity in advance (example 3D point classification) and is not computed on the fly as is needed for signed distance function completion where the location of the level set is not known in advance (it’s the target of the net)
 Malik[] used dynamic computation on graphs (in Torch) for 3D object generation from images. This work is my exploration, trying to use PyTorch's simple dynamic graphs to denoise/ complete SDF efficiently.
 
+## Labels
+One hot labels are [0,1,2] =  [inside, outside, mixed]
+Since the labels are unbalanced (more outside then inside) we use weights in the CrossEntropy [16,1]. otherwise will tend to converge to trivial empty tsdf
+TODO, this is not ideal, is there a better way? 
+
 ## Hyrarchal architecture
 each level l
 

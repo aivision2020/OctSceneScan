@@ -5,7 +5,12 @@ import torch.nn.functional as F
 import numpy as np
 
 
-device = 'cpu'
+#device = 'cpu'
+device = 'cuda'
+
+INSIDE=0
+OUTSIDE=1
+MIXED=2
 
 
 class Conv3d(nn.Module):
@@ -37,39 +42,8 @@ class Debug(nn.Module):
 
     def forward(self, input):
         #import ipdb; ipdb.set_trace()
-        zeros = float(np.count_nonzero(input == 0))/input.numel()
-        #print(self.str, input.shape, zeros)
+        #print(self.str, input.shape, input[0,0].min(), input[0,0].max())
         return input
-
-
-class PredictionBlock(nn.Module):
-    '''output prediction for this block  '''
-
-    def __init__(self, inplane, n_class, block_size, bn=True):
-        super(PredictionBlock, self).__init__()
-        modules = []
-        modules.append(Debug('input prediction'))
-        lastdim = inplane//2
-        dim = lastdim
-
-        size = block_size
-        for i in range(int(np.log2(block_size)-1)):
-            if dim > 8:
-                dim//=2
-            modules.append(nn.MaxPool3d(kernel_size=2))
-            modules.append(Conv3d(lastdim, dim))
-            modules.append(Debug('after %d pools'%i))
-            lastdim=dim
-
-        modules.append(Flatten())
-        modules.append(nn.Linear(dim, n_class))  # 2^3
-        # add dropout?
-        modules.append(nn.Softmax(dim=1))
-        self.module = nn.Sequential(*modules)
-
-    def forward(self, x):
-        out = self.module(x)
-        return out
 
 
 class BottomLevel(nn.Module):
@@ -92,10 +66,10 @@ class BottomLevel(nn.Module):
         #2 more convs for prediction. final size == block size (no overlap)
         modules.append(Conv3d(inplane, inplane))
         modules.append(Debug('botttom level pred 1'))
-        modules.append(Conv3d(inplane, 2))
+        modules.append(Conv3d(inplane, 2, False, False))
         modules.append(Debug('botttom level pred 2'))
-        modules.append(nn.Softmax(dim=1))
-        modules.append(Debug('botttom level pred softmax'))
+        #modules.append(nn.Softmax(dim=1))
+        #modules.append(Debug('botttom level pred softmax'))
         self.convs = nn.Sequential(*modules)
         self.block_size = block_size
 
@@ -121,50 +95,6 @@ class BottomLevel(nn.Module):
         pred = {X: self.convs(T) for X, T in cat.items()}
         assert np.all([p.shape[-1]==self.block_size for p in pred.values()])
         return [pred]
-
-
-class MidLevel(nn.Module):
-    def __init__(self, inplane, outplane, sub_level, block_size, thresh=0.1):
-        super(MidLevel, self).__init__()
-        self.sub_level = sub_level
-        assert False, "Basic Block is depricated. Use Conv3d"
-        self.upsample = BasicBlock(inplane, inplane, upsample=True)
-        self.tsdf_block = BasicBlock(1, 16)
-        self.block1 = BasicBlock(inplane+16, outplane)
-        self.pred = PredictionBlock(outplane, 3)
-        self.thresh = thresh
-        self.block_size = block_size
-
-    def forward(self, tsdf_pyramid, prev):
-        assert type(tsdf_pyramid) == list
-        assert type(prev) == dict
-        prevs = {X: self.upsample(p) for X, p in prev.items()}
-        assert p.shape[-1]==self.block_size+n_conv-2
-        #TODO split tsdf with overlap
-        tsdfs = {(x, y, z): tsdf_pyramid[-1][:, :,
-                                             x*self.block_size:(x+1)*self.block_size,
-                                             y*self.block_size:(y+1)*self.block_size,
-                                             z*self.block_size:(z+1)*self.block_size]
-                 for (x, y, z) in prevs.keys()}
-        #tsdfs = {X: self.tsdf_block(T) for X, T in tsdfs.items()}
-        out = {X: torch.cat((prevs[X], tsdfs[X]), dim=1) for X in prevs.keys()}
-        feat = {X: self.block1(T) for X, T in out.items()}
-        pred = {X: self.pred(T) for X, T in feat.items()}
-
-        # durring training continue down the octree randomly (sampled toward
-        # cells with boundaries
-        if self.training:
-            p_tot = torch.Tensor([p[0, -1] for p in
-                                  pred.values()]).to(device).sum()
-            mixed = [X for X, p in pred.items() if p[0, -1]/p_tot > np.random.rand()]
-        else:
-            # durring test time continue to refine only boundary cells
-            mixed = [X for X, p in pred.items() if p[0, -1] > self.thresh]
-
-        refine = {}
-        for x, y, z in mixed:
-            refine.update(_split_tree(feat[(x, y, z)], x, y, z))
-        return self.sub_level(tsdf_pyramid[:-1], refine) + [pred]
 
 
 def _split_overlap(a, dim, pad):
@@ -207,8 +137,6 @@ class TopLevel(nn.Module):
             modules.append(Conv3d(outplane, outplane))
         self.convs = nn.Sequential(*modules)
 
-        #self.pred = PredictionBlock(outplane, 3, block_size=block_size)
-
 
     def forward(self, TSDF):
         last = TSDF
@@ -218,84 +146,98 @@ class TopLevel(nn.Module):
             pyramid.append(self.rep_pad(last))
         feat = self.convs(pyramid[-1])
         #print(feat.shape)
-        #pred = self.pred(feat)
-        # always split top level. No early termination yet
         assert feat.shape[-1] == self.block_size+2*self.pad, (feat.shape[-1], self.block_size)
 
-        #print("before top level feat split")
-        #print(feat.shape)
+        # always split top level. No early termination yet
         subtree = _split_tree(feat,padding=2)
-        #print("after top level feat split")
-        #print([p.shape for p in subtree.values()])
 
         #label as mixed [inside, mixed, outside] . negative tsdf is inside object
+        mixed = torch.zeros(1,3).float().to(device)
+        mixed[0,MIXED]=1
         return self.sub_level(pyramid[:-1], subtree) + [
-                {(0, 0, 0): torch.Tensor([[0,1,0]]).float().to(device)}]
+                {(0, 0, 0): mixed}]
 
 
 class OctreeCrossEntropyLoss(nn.Module):
     def __init__(self, gt_label, block_size):
         super(OctreeCrossEntropyLoss, self).__init__()
-        '''gt_label is the GT signed binary distance function'''
+        '''
+        gt_label is the GT signed binary distance function
+        0 <= gt_label <=1. while 0 is "inside" and 1 is "outside"
+        '''
+
         self.block_size = block_size
         self.max_level = int(np.log2(gt_label.shape[-1]/block_size))
         assert 2**self.max_level*block_size == gt_label.shape[-1]
-        self.criteria = nn.CrossEntropyLoss()
+        self.full_loss = nn.CrossEntropyLoss(weight=torch.Tensor([16,1]))
+        #self.singles_loss = nn.NLLLoss()
         self.gt_octree = [{} for _ in range(self.max_level+1)]  # each level is a dictionary
         for level in range(self.max_level, -1, -1):
             bs = block_size*np.power(2, level)
             num_blocks = gt_label.shape[-1]//bs
-            for x in range(num_blocks):
-                for y in range(num_blocks):
-                    for z in range(num_blocks):
-                        label = gt_label[:, x*bs:(x+1)*bs,
-                                         y*bs:(y+1)*bs,
-                                         z*bs:(z+1)*bs]
-                        mixed = torch.max(label) != torch.min(label)
-                        if mixed:
-                            if level == 0:
-                                self.gt_octree[level][(x, y, z)] = label
-                            else:
-                                self.gt_octree[level][(x, y, z)] = torch.ones([1], device=device).long()*2
-                        else:
-                            # all labels are the same, and are either -1 or 1.
-                            #so (label+1)/2 is 0 or 1
-                            self.gt_octree[level][(x, y, z)] = torch.ones([1], device=device).long()*(label[0, 0, 0, 0]+1)//2
+            for (x,y,z) in itertools.product(range(num_blocks),
+                    range(num_blocks), range(num_blocks)):
+                label = gt_label[:, x*bs:(x+1)*bs,
+                        y*bs:(y+1)*bs,
+                        z*bs:(z+1)*bs]
+                self.gt_octree[level][(x,y,z)] = self._encode_block(label, level)
+
+    def _encode_block(self, label, level):
+        """ encode a dense label tensor into octree format
+        label - the dense label block
+        level - current level of octree (only level 0 will return a dense label
+        """
+        mixed = torch.max(label) != torch.min(label)
+        if mixed:
+            if level == 0:
+                #finest level. keep all dense data
+                return label
+            else:
+                # encode current level as "mixed"
+                return torch.ones([1], device=device).long()*MIXED
+        else:
+            # all labels are the same, encode only once
+            return torch.ones(
+                    [1], device=device).long()*label[0, 0, 0, 0]
 
     def loss_singles(self, l, gt, bs):
         assert gt.numel() > 0, l.numel() > 0
+        assert l[0,MIXED]==1 and gt==MIXED, (l,gt)
         try:
-            ret = self.criteria(l, gt)*bs**3
-            return ret
+            return torch.log(l[0,gt[0]])
+            #ret = self.singles_loss(l, gt)*bs**3
+            #assert ret>0
+            #return ret
         except:
             import ipdb; ipdb.set_trace()
             print('something is wrong')
 
     def loss_full_single(self, l, gt):
         try:
-            return self.criteria(l, torch.ones_like(l[:, 0]).long()*gt)
+            #import ipdb; ipdb.set_trace()
+            return self.full_loss(l, torch.ones_like(l[:, 0]).long()*gt)
         except:
             print('something is wrong')
             import ipdb; ipdb.set_trace()
 
     def loss_single_full(self, l, gt, bs):
         try:
-            loss = self.criteria(l, torch.ones(1, device=device).long()*2)
+            import ipdb; ipdb.set_trace()
+            loss = self.criteria(l, torch.ones(1, device=device).long()*gt)
             return loss
         except:
             print('something is wrong')
-            import ipdb
-            ipdb.set_trace()
+            import ipdb; ipdb.set_trace()
 
     def loss_fulls(self, l, gt):
         try:
-            return self.criteria(l, gt)
+            return self.full_loss(l, gt)
         except:
             print('something is wrong')
-            import ipdb
-            ipdb.set_trace()
+            import ipdb; ipdb.set_trace()
 
     def forward(self, octree):
+        #import ipdb;ipdb.set_trace()
         assert len(octree) <= len(self.gt_octree), (len(octree), len(self.gt_octree))
         ret = torch.zeros(1, device=device).squeeze()
         for level in range(len(octree)-1, -1, -1):
@@ -315,24 +257,114 @@ class OctreeCrossEntropyLoss(nn.Module):
                         ret += self.loss_single_full(label, gt, bs)
                     else:
                         ret += self.loss_fulls(label, gt)
+                assert ret>=0, (ret, X, level)
         return ret
 
 
 def octree_to_sdf(octree, block_size):
+    #remember octree holds one hot labels (or actual activations)
     dim = block_size*2**(len(octree)-1)
     sdf = np.zeros((dim, dim, dim))
+    def label_to_dist(l):
+        assert np.all(l.numpy().ravel()<2)
+        return l*2-1
+    #{INSIDE:-1, OUTSIDE:1, MIXED:0}
     for level in range(len(octree)-1, -1, -1):
         bs = block_size*np.power(2, level)
         for (x, y, z), label in octree[level].items():
+            assert label.shape[0]==1, 'donr support batch size more then one'
             label = label.cpu()
             if label.numel() == 1:
-                sdf[x*bs:(x+1)*bs, y*bs:(y+1)*bs, z*bs:(z+1)*bs] = label
+                sdf[x*bs:(x+1)*bs, y*bs:(y+1)*bs, z*bs:(z+1)*bs] = label_to_dist(label)
             if label.numel() == 3 and torch.argmax(label) != 2:
-                sdf[x*bs:(x+1)*bs, y*bs:(y+1)*bs, z*bs:(z+1)*bs] = torch.argmax(label)*2-1
+                label = torch.argmax(label, dim=0)
+                sdf[x*bs:(x+1)*bs, y*bs:(y+1)*bs, z*bs:(z+1)*bs] = label_to_dist(label)
             if label.shape == (1, 2, block_size, block_size, block_size):
+                #import ipdb; ipdb.set_trace()
+                label = torch.argmax(label[0], dim=0)
                 assert level == 0
-                sdf[x*bs:(x+1)*bs, y*bs:(y+1)*bs, z*bs:(z+1)*bs] = torch.argmax(label[0], dim=0)*2-1
+                sdf[x*bs:(x+1)*bs, y*bs:(y+1)*bs, z*bs:(z+1)*bs] = label_to_dist(label)
             if label.shape == (1, 1, block_size, block_size, block_size):
                 assert level == 0
-                sdf[x*bs:(x+1)*bs, y*bs:(y+1)*bs, z*bs:(z+1)*bs] = label
+                sdf[x*bs:(x+1)*bs, y*bs:(y+1)*bs, z*bs:(z+1)*bs] = label_to_dist(label)
     return sdf
+
+
+
+
+#class MidLevel(nn.Module):
+#    def __init__(self, inplane, outplane, sub_level, block_size, thresh=0.1):
+#        super(MidLevel, self).__init__()
+#        self.sub_level = sub_level
+#        assert False, "Basic Block is depricated. Use Conv3d"
+#        self.upsample = BasicBlock(inplane, inplane, upsample=True)
+#        self.tsdf_block = BasicBlock(1, 16)
+#        self.block1 = BasicBlock(inplane+16, outplane)
+#        self.pred = PredictionBlock(outplane, 3)
+#        self.thresh = thresh
+#        self.block_size = block_size
+#
+#    def forward(self, tsdf_pyramid, prev):
+#        assert type(tsdf_pyramid) == list
+#        assert type(prev) == dict
+#        prevs = {X: self.upsample(p) for X, p in prev.items()}
+#        assert p.shape[-1]==self.block_size+n_conv-2
+#        #TODO split tsdf with overlap
+#        tsdfs = {(x, y, z): tsdf_pyramid[-1][:, :,
+#                                             x*self.block_size:(x+1)*self.block_size,
+#                                             y*self.block_size:(y+1)*self.block_size,
+#                                             z*self.block_size:(z+1)*self.block_size]
+#                 for (x, y, z) in prevs.keys()}
+#        #tsdfs = {X: self.tsdf_block(T) for X, T in tsdfs.items()}
+#        out = {X: torch.cat((prevs[X], tsdfs[X]), dim=1) for X in prevs.keys()}
+#        feat = {X: self.block1(T) for X, T in out.items()}
+#        pred = {X: self.pred(T) for X, T in feat.items()}
+#
+#        # durring training continue down the octree randomly (sampled toward
+#        # cells around the surface
+#        if self.training:
+#            #TODO I'm not sure about any of this. this whole mid level needs
+#            debuging
+#            import ipdb; ipdb.set_trace()
+#            p_tot = torch.Tensor([p[0, MIXED] for p in
+#                                  pred.values()]).to(device).sum()
+#            mixed = [X for X, p in pred.items() if p[0, -1]/p_tot > np.random.rand()]
+#        else:
+#            # durring test time continue to refine only boundary cells
+#            mixed = [X for X, p in pred.items() if p[0, -1] > self.thresh]
+#
+#        refine = {}
+#        for x, y, z in mixed:
+#            refine.update(_split_tree(feat[(x, y, z)], x, y, z))
+#        return self.sub_level(tsdf_pyramid[:-1], refine) + [pred]
+
+
+#class PredictionBlock(nn.Module):
+#    '''output prediction for this block  '''
+#
+#    def __init__(self, inplane, n_class, block_size, bn=True):
+#        super(PredictionBlock, self).__init__()
+#        modules = []
+#        modules.append(Debug('input prediction'))
+#        lastdim = inplane//2
+#        dim = lastdim
+#
+#        size = block_size
+#        for i in range(int(np.log2(block_size)-1)):
+#            if dim > 8:
+#                dim//=2
+#            modules.append(nn.MaxPool3d(kernel_size=2))
+#            modules.append(Conv3d(lastdim, dim))
+#            modules.append(Debug('after %d pools'%i))
+#            lastdim=dim
+#
+#        modules.append(Flatten())
+#        modules.append(nn.Linear(dim, n_class))  # 2^3
+#        # add dropout?
+#        modules.append(nn.Softmax(dim=1))
+#        self.module = nn.Sequential(*modules)
+#
+#    def forward(self, x):
+#        out = self.module(x)
+#        return out
+#
