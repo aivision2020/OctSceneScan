@@ -5,11 +5,10 @@ import numpy as np
 import torch
 from torch.autograd import Variable
 from model import *
-from model import _split_tree
 from data_utils import *
 
 feature_dim = 8
-block_size = 32
+block_size = 16
 pad=2
 n_conv=3
 
@@ -248,7 +247,7 @@ def test_2tier_net_single_data():
 
 
 def test_2tier_net(res=64, block_size=block_size):
-    dataset = TsdfGenerator(res, n_elips=3, sigma=0.9, epoch_size=10000)
+    dataset = TsdfGenerator(res, n_elips=3, sigma=0.9, epoch_size=1000)
     train_loader = torch.utils.data.DataLoader(dataset, batch_size=1,
                                                num_workers=2)
 
@@ -261,7 +260,6 @@ def test_2tier_net(res=64, block_size=block_size):
                                block_size, thresh=0.1))
     mod = TopLevel(feature_dim, layers[-1], block_size=block_size)
     if device == 'cuda':
-        criteria.cuda()
         mod.cuda()
     optimizer = optim.Adam(mod.parameters(), lr=0.001)  # , momentum=0.9)
     last_t = time.time()
@@ -270,20 +268,17 @@ def test_2tier_net(res=64, block_size=block_size):
         assert gt.max() > 1 and gt.min() < -1
         gt_label = torch.zeros_like(gt, device=device)
         gt_label[gt >= 0] = 1
-        gt_label = gt_label.long()
+        gt_label = gt_label.long().to(device)
         criteria = OctreeCrossEntropyLoss(gt_label, block_size)
-        tsdf = tsdf_in.float().cuda()
+        #tsdf = tsdf_in.float().cuda()
         t = time.time()
+        tsdf = tsdf_in.float().to(device)
         pred = mod(tsdf)
         forward_t = time.time()-t
         t = time.time()
         loss = criteria(pred)
         loss_t = time.time()-t
         t = time.time()
-        for i, l in enumerate(pred):
-            resample = (2**i)
-            print('level %d, %d/%d trained' % (i, len(l),
-                                               (res/block_size/resample)**3))
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
@@ -293,17 +288,14 @@ def test_2tier_net(res=64, block_size=block_size):
         print('timming:{}. forward {}, loss {}, back {}'.format(t-last_t,
                                                                 forward_t, loss_t, back_t))
         last_t = t
-        if (it+1) % 2 == 0:
+        if (it+1) % 20 == 0:
             mod.eval()
             out = mod(tsdf)
-            for i, l in enumerate(pred):
+            for i in range(1,len(out)):
                 resample = (2**i)
-                print('Eval: level %d, %d/%d evaluated' % (i, len(l),
+                print('Eval: level %d, %d/%d evaluated' % (i, len(out[i]),
                                                            (res/block_size/resample)**3))
             sdf_ = octree_to_sdf(out, block_size)
-            print(gt[0].shape)
-            print(sdf_.shape)
-            print(tsdf_in[0][0].shape)
             err = plotVoxelVisdom(gt[0].numpy(), sdf_, tsdf_in[0][0].numpy(), vis)
             mod.train()
             print(it, err)
@@ -355,8 +347,8 @@ if __name__ == '__main__':
     #test_bottom_io()
     #test_bottom_layer()
     #test_simple_net_single_data()
-    # TODO why does this not converge? interesting
-    test_2tier_net_single_data()
-    exit()
-    #test_2tier_net(res=64, block_size=block_size)
+    ## TODO why does this not converge? interesting
+    #test_2tier_net_single_data()
+    #test_2tier_net(res=32, block_size=block_size)
+    test_2tier_net(res=64, block_size=block_size)
     #test_2tier_net(res=128, block_size=block_size)

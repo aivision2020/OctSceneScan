@@ -30,9 +30,6 @@ class Conv3d(nn.Module):
         return out
 
 
-class Flatten(nn.Module):
-    def forward(self, input):
-        return input.view(input.size(0), -1)
 
 
 class Debug(nn.Module):
@@ -68,6 +65,7 @@ class BottomLevel(nn.Module):
         modules.append(Debug('botttom level pred 1'))
         modules.append(Conv3d(inplane, 2, False, False))
         modules.append(Debug('botttom level pred 2'))
+
         #modules.append(nn.Softmax(dim=1))
         #modules.append(Debug('botttom level pred softmax'))
         self.convs = nn.Sequential(*modules)
@@ -85,9 +83,9 @@ class BottomLevel(nn.Module):
         padded_size = self.block_size+2*self.pad+2*self.n_conv
         tsdfs = {(x, y, z):
                 tsdf_pyramid[-1][:, :,
-                    x*self.block_size:(x+1)*padded_size,
-                    y*self.block_size:(y+1)*padded_size,
-                    z*self.block_size:(z+1)*padded_size]
+                    x*self.block_size:x*self.block_size+padded_size,
+                    y*self.block_size:y*self.block_size+padded_size,
+                    z*self.block_size:z*self.block_size+padded_size]
             for (x, y, z) in prevs.keys()}
         #print("tsdfs")
         #print([p.shape for p in tsdfs.values()])
@@ -102,7 +100,7 @@ def _split_overlap(a, dim, pad):
     return a.narrow(dim, 0, n+2*pad), a.narrow(dim, n, n+2*pad)
 
 
-def _split_tree(feat, parent_x=0, parent_y=0, parent_z=0, padding=2):
+def split_tree(feat, parent_x=0, parent_y=0, parent_z=0, padding=2):
     #pad is one sided (always even)
     block_size = feat.shape[-1]
     assert feat.shape[-1] == feat.shape[-2] == feat.shape[-3]
@@ -129,8 +127,6 @@ class TopLevel(nn.Module):
 
         modules=[]
         modules.append(Conv3d(1, outplane))
-        dim = 2
-        lastdim = 1
         for i in range(self.n_conv-1):
             #dims are 40,38,36 (assuming block size 32)
             # 36 = block size + 2*pad
@@ -149,7 +145,7 @@ class TopLevel(nn.Module):
         assert feat.shape[-1] == self.block_size+2*self.pad, (feat.shape[-1], self.block_size)
 
         # always split top level. No early termination yet
-        subtree = _split_tree(feat,padding=2)
+        subtree = split_tree(feat,padding=2)
 
         #label as mixed [inside, mixed, outside] . negative tsdf is inside object
         mixed = torch.zeros(1,3).float().to(device)
@@ -169,7 +165,7 @@ class OctreeCrossEntropyLoss(nn.Module):
         self.block_size = block_size
         self.max_level = int(np.log2(gt_label.shape[-1]/block_size))
         assert 2**self.max_level*block_size == gt_label.shape[-1]
-        self.full_loss = nn.CrossEntropyLoss(weight=torch.Tensor([16,1]))
+        self.full_loss = nn.CrossEntropyLoss(weight=torch.Tensor([16,1]).to(device))
         #self.singles_loss = nn.NLLLoss()
         self.gt_octree = [{} for _ in range(self.max_level+1)]  # each level is a dictionary
         for level in range(self.max_level, -1, -1):
@@ -202,7 +198,6 @@ class OctreeCrossEntropyLoss(nn.Module):
 
     def loss_singles(self, l, gt, bs):
         assert gt.numel() > 0, l.numel() > 0
-        assert l[0,MIXED]==1 and gt==MIXED, (l,gt)
         try:
             return torch.log(l[0,gt[0]])
             #ret = self.singles_loss(l, gt)*bs**3
@@ -280,7 +275,6 @@ def octree_to_sdf(octree, block_size):
                 label = torch.argmax(label, dim=0)
                 sdf[x*bs:(x+1)*bs, y*bs:(y+1)*bs, z*bs:(z+1)*bs] = label_to_dist(label)
             if label.shape == (1, 2, block_size, block_size, block_size):
-                #import ipdb; ipdb.set_trace()
                 label = torch.argmax(label[0], dim=0)
                 assert level == 0
                 sdf[x*bs:(x+1)*bs, y*bs:(y+1)*bs, z*bs:(z+1)*bs] = label_to_dist(label)
@@ -290,81 +284,86 @@ def octree_to_sdf(octree, block_size):
     return sdf
 
 
+class Flatten(nn.Module):
+    def forward(self, input):
+        return input.view(input.size(0), -1)
+
+class PredictionBlock(nn.Module):
+    '''output prediction for this block  '''
+
+    def __init__(self, inplane, n_class, input_res, bn=True):
+        super(PredictionBlock, self).__init__()
+        modules = []
+        modules.append(Debug('input prediction'))
+        lastdim = inplane
+
+        res = input_res
+        while res > 3:
+            dim = lastdim
+            if lastdim > 8:
+                dim//=2
+            modules.append(Conv3d(lastdim, dim, bn=bn))
+            modules.append(Debug('input prediction'))
+            modules.append(nn.MaxPool3d(kernel_size=2))
+            modules.append(Debug('input prediction'))
+            res = (res-2)//2
+            lastdim=dim
+
+        modules.append(Flatten())
+        modules.append(nn.Linear(dim, n_class))  # 2^3
+        # add dropout?
+        modules.append(nn.Softmax(dim=1))
+        self.module = nn.Sequential(*modules)
+
+    def forward(self, x):
+        out = self.module(x)
+        return out
 
 
-#class MidLevel(nn.Module):
-#    def __init__(self, inplane, outplane, sub_level, block_size, thresh=0.1):
-#        super(MidLevel, self).__init__()
-#        self.sub_level = sub_level
-#        assert False, "Basic Block is depricated. Use Conv3d"
-#        self.upsample = BasicBlock(inplane, inplane, upsample=True)
-#        self.tsdf_block = BasicBlock(1, 16)
-#        self.block1 = BasicBlock(inplane+16, outplane)
-#        self.pred = PredictionBlock(outplane, 3)
-#        self.thresh = thresh
-#        self.block_size = block_size
-#
-#    def forward(self, tsdf_pyramid, prev):
-#        assert type(tsdf_pyramid) == list
-#        assert type(prev) == dict
-#        prevs = {X: self.upsample(p) for X, p in prev.items()}
-#        assert p.shape[-1]==self.block_size+n_conv-2
-#        #TODO split tsdf with overlap
-#        tsdfs = {(x, y, z): tsdf_pyramid[-1][:, :,
-#                                             x*self.block_size:(x+1)*self.block_size,
-#                                             y*self.block_size:(y+1)*self.block_size,
-#                                             z*self.block_size:(z+1)*self.block_size]
-#                 for (x, y, z) in prevs.keys()}
-#        #tsdfs = {X: self.tsdf_block(T) for X, T in tsdfs.items()}
-#        out = {X: torch.cat((prevs[X], tsdfs[X]), dim=1) for X in prevs.keys()}
-#        feat = {X: self.block1(T) for X, T in out.items()}
-#        pred = {X: self.pred(T) for X, T in feat.items()}
-#
-#        # durring training continue down the octree randomly (sampled toward
-#        # cells around the surface
-#        if self.training:
-#            #TODO I'm not sure about any of this. this whole mid level needs
-#            debuging
-#            import ipdb; ipdb.set_trace()
-#            p_tot = torch.Tensor([p[0, MIXED] for p in
-#                                  pred.values()]).to(device).sum()
-#            mixed = [X for X, p in pred.items() if p[0, -1]/p_tot > np.random.rand()]
-#        else:
-#            # durring test time continue to refine only boundary cells
-#            mixed = [X for X, p in pred.items() if p[0, -1] > self.thresh]
-#
-#        refine = {}
-#        for x, y, z in mixed:
-#            refine.update(_split_tree(feat[(x, y, z)], x, y, z))
-#        return self.sub_level(tsdf_pyramid[:-1], refine) + [pred]
+class MidLevel(nn.Module):
+    def __init__(self, inplane, outplane, sub_level, block_size, thresh=0.1):
+        super(MidLevel, self).__init__()
+        self.sub_level = sub_level
+        self.thresh = thresh
+        self.block_size = block_size
+        self.n_conv=3
+        self.branch_factor=2
+        self.pad = self.n_conv-1
+        self.pred = PredictionBlock(inplane, 3, self.block_size//2 +2*self.pad)
+        self.upsample = nn.ConvTranspose3d( inplane, inplane, kernel_size=4,
+                stride=2, padding=0, output_padding=0, bias=False)
+        self.convs = nn.Sequential(*[Conv3d(inplane+1 if i==0 else outplane, outplane)
+                for i in range(self.n_conv)])
 
 
-#class PredictionBlock(nn.Module):
-#    '''output prediction for this block  '''
-#
-#    def __init__(self, inplane, n_class, block_size, bn=True):
-#        super(PredictionBlock, self).__init__()
-#        modules = []
-#        modules.append(Debug('input prediction'))
-#        lastdim = inplane//2
-#        dim = lastdim
-#
-#        size = block_size
-#        for i in range(int(np.log2(block_size)-1)):
-#            if dim > 8:
-#                dim//=2
-#            modules.append(nn.MaxPool3d(kernel_size=2))
-#            modules.append(Conv3d(lastdim, dim))
-#            modules.append(Debug('after %d pools'%i))
-#            lastdim=dim
-#
-#        modules.append(Flatten())
-#        modules.append(nn.Linear(dim, n_class))  # 2^3
-#        # add dropout?
-#        modules.append(nn.Softmax(dim=1))
-#        self.module = nn.Sequential(*modules)
-#
-#    def forward(self, x):
-#        out = self.module(x)
-#        return out
-#
+    def forward(self, tsdf_pyramid, prev):
+        assert type(tsdf_pyramid) == list
+        assert type(prev) == dict
+        pred = {X: self.pred(T) for X, T in prev.items()}
+        if self.training:
+            assert np.all([p.shape==(1,3) for p in pred.values()])
+            tmp = [p[0,MIXED] for X,p in pred.items()]
+            tmp = torch.Tensor(tmp)
+            inds = torch.multinomial(tmp, self.branch_factor)
+            keys = list(pred)
+            mixed = [keys[i] for i in inds]
+        else:
+            # durring test time continue to refine only boundary cells
+            mixed = [X for X, p in pred.items() if sm(p)[0, -1] > self.thresh]
+
+        prevs = {X: self.upsample(prev[X]) for X in mixed}
+        padded_size = self.block_size+2*self.pad+2*self.n_conv
+        tsdfs = {(x, y, z):
+                tsdf_pyramid[-1][:, :,
+                    x*self.block_size:(x+1)*padded_size,
+                    y*self.block_size:(y+1)*padded_size,
+                    z*self.block_size:(z+1)*padded_size]
+            for (x, y, z) in prevs.keys()}
+        cat = {X: torch.cat((prevs[X], tsdfs[X]), dim=1) for X in prevs.keys()}
+        features = {X: self.convs(T) for X, T in cat.items()}
+        subtree = {}
+        for (x,y,z), feat in features.items():
+            subtree.update(split_tree(feat,x,y,z))
+
+        return self.sub_level(tsdf_pyramid[:-1], subtree) + [pred]
+
